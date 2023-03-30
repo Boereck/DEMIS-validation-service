@@ -27,7 +27,6 @@ import ca.uhn.fhir.validation.SingleValidationMessage;
 import ca.uhn.fhir.validation.ValidationResult;
 import de.gematik.demis.validationservice.services.FhirContextService;
 import de.gematik.demis.validationservice.services.ProfileParserService;
-import de.gematik.demis.validationservice.services.validation.severity.SeverityComparator;
 import de.gematik.demis.validationservice.services.validation.severity.SeverityParser;
 import java.util.HashSet;
 import java.util.List;
@@ -59,7 +58,19 @@ import org.springframework.stereotype.Service;
 @Service
 @Slf4j
 public class ValidationService {
-  private static final SeverityComparator SEVERITY_COMPARATOR = new SeverityComparator();
+
+  static final int severityOrder(ResultSeverityEnum severity) {
+    if (severity == null) {
+      return 0;
+    }
+    return switch (severity) {
+      case INFORMATION -> 0;
+      case WARNING -> 1;
+      case ERROR -> 2;
+      case FATAL -> 3;
+    };
+  }
+
   private static final Set<String> FILTERED_MESSAGES_KEYS =
       Set.of(
           "Reference_REF_CantMatchChoice",
@@ -68,7 +79,7 @@ public class ValidationService {
           "This_element_does_not_match_any_known_slice_");
   private final FhirContextService fhirContextService;
   private final FhirValidator validator;
-  private final ResultSeverityEnum minSeverityOutcome;
+  private final int minSeverityOutcome;
   private Set<String> filteredMessagePrefixes;
 
   public ValidationService(
@@ -76,14 +87,15 @@ public class ValidationService {
       ProfileParserService profileParserService,
       @Value("${demis.validation-service.minSeverityOutcome}") String minSeverityOutcome) {
     this.fhirContextService = fhirContextService;
-    this.minSeverityOutcome = SeverityParser.parse(minSeverityOutcome);
-    if (this.minSeverityOutcome == null) {
+    ResultSeverityEnum minSeverity = SeverityParser.parse(minSeverityOutcome);
+    if (minSeverity == null) {
       String errorMessage =
           "Configured minSeverityOutcome has an illegal value: %s".formatted(minSeverityOutcome);
       log.error(errorMessage);
       throw new NoSuchElementException(
           errorMessage); // Shutdown service -> No silent config error treatment
     }
+    this.minSeverityOutcome = severityOrder(minSeverity);
     Locale parsedLocale = fhirContextService.getConfiguredLocale();
     Locale oldLocale = Locale.getDefault();
     Locale.setDefault(parsedLocale);
@@ -185,12 +197,8 @@ public class ValidationService {
   private OperationOutcome toOperationOutcome(ValidationResult validationResult) {
     List<SingleValidationMessage> collect =
         validationResult.getMessages().stream()
-            .filter(
-                message ->
-                    filteredMessagePrefixes.stream().noneMatch(message.getMessage()::startsWith))
-            .filter(
-                message ->
-                    SEVERITY_COMPARATOR.compare(message.getSeverity(), minSeverityOutcome) >= 0)
+            .filter(this::isAllowedMessage)
+            .filter(this::atLeastMinSeverity)
             .toList();
     ValidationResult filteredValidationResult =
         new ValidationResult(fhirContextService.getFhirContext(), collect);
@@ -199,6 +207,14 @@ public class ValidationService {
     filteredValidationResult.populateOperationOutcome(outcome);
 
     return outcome;
+  }
+
+  private boolean isAllowedMessage(SingleValidationMessage message) {
+    return filteredMessagePrefixes.stream().noneMatch(message.getMessage()::startsWith);
+  }
+
+  private boolean atLeastMinSeverity(SingleValidationMessage message) {
+    return severityOrder(message.getSeverity()) >= minSeverityOutcome;
   }
 
   public OperationOutcome validate(String content) {

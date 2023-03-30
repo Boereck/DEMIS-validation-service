@@ -16,12 +16,15 @@
  *
  */
 
-package de.gematik.demis.validationservice.services;
+package de.gematik.demis.validationservice.services.validation;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import de.gematik.demis.validationservice.services.validation.ValidationService;
+import ca.uhn.fhir.validation.ResultSeverityEnum;
+import de.gematik.demis.validationservice.services.FhirContextService;
+import de.gematik.demis.validationservice.services.ProfileParserService;
 import de.gematik.demis.validationservice.util.FileTestUtil;
 import de.gematik.demis.validationservice.util.ResourceFileConstants;
 import java.io.IOException;
@@ -59,6 +62,38 @@ class ValidationServiceTest {
         new ProfileParserService(fhirContextService, ResourceFileConstants.PROFILE_RESOURCE_PATH);
     validationService =
         new ValidationService(fhirContextService, profileParserService, "information");
+  }
+
+  @Test
+  void compareErrorAndInformationAndCheckErrorIsGreater() {
+    int info = ValidationService.severityOrder(ResultSeverityEnum.INFORMATION);
+    int error = ValidationService.severityOrder(ResultSeverityEnum.ERROR);
+
+    assertThat(info).isLessThan(error);
+  }
+
+  @Test
+  void compareErrorAndWARNINGAndCheckErrorIsGreater() {
+    int warning = ValidationService.severityOrder(ResultSeverityEnum.WARNING);
+    int error = ValidationService.severityOrder(ResultSeverityEnum.ERROR);
+
+    assertThat(warning).isLessThan(error);
+  }
+
+  @Test
+  void compareErrorAndFatalAndCheckFatalIsGreater() {
+    int fatal = ValidationService.severityOrder(ResultSeverityEnum.FATAL);
+    int error = ValidationService.severityOrder(ResultSeverityEnum.ERROR);
+
+    assertThat(error).isLessThan(fatal);
+  }
+
+  @Test
+  void compareErrorAndErrorAndCheckItIsTheSame() {
+    int error1 = ValidationService.severityOrder(ResultSeverityEnum.ERROR);
+    int error2 = ValidationService.severityOrder(ResultSeverityEnum.ERROR);
+
+    assertEquals(error1, error2);
   }
 
   @Test
